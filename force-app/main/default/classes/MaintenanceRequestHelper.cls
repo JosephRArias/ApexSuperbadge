@@ -22,8 +22,11 @@ public with sharing class MaintenanceRequestHelper {
             List<Equipment_Maintenance_Item__c> equipmentsToTransfer = [SELECT Maintenance_Request__c, Equipment__c FROM Equipment_Maintenance_Item__c WHERE Maintenance_Request__c = :maintenanceRequestId];
             List<Equipment_Maintenance_Item__c> equipmentsToAdd = new List<Equipment_Maintenance_Item__c>();
             for(Equipment_Maintenance_Item__c eq : equipmentsToTransfer){
-                
+                Equipment_Maintenance_Item__c newItem = eq.clone();
+                newItem.Maintenance_Request__c = maintenanceRequestId;
+                equipmentsToAdd.add(newItem);
             }
+            insert equipmentsToAdd;
             insert routineCheckups;
         }
     }
