@@ -2,44 +2,59 @@ public with sharing class MaintenanceRequestHelper {
     public MaintenanceRequestHelper() {
 
     }
-    public void handleUpdate(List<Case> maintenanceRequests){
+    @AuraEnabled(cacheable=false)
+    public static void handleUpdate(List<Case> maintenanceRequests){
         List<Case> routineCheckups = new List<Case>();
-        Id maintenanceRequestId;
+        Set<Id> maintenanceRequestIds  = new Set<Id>();
+        Map<Id,Id> oldAndNewMaintenanceRequest = new Map<Id,Id>();
         for(Case c : maintenanceRequests){
            if(c.Status == 'Closed' && (c.Type == 'Repair' || c.Type == 'Routine Maintenance')){
-                maintenanceRequestId = c.Id;
+                maintenanceRequestIds.add(c.Id);
+           }
+        }
+        Map<Id, Date> caseToDueDateMap = new Map<Id, Date>();
+        List<AggregateResult> results = [SELECT Maintenance_Request__c, MIN(Equipment__r.Maintenance_Cycle__c) minCycle
+                                         FROM Equipment_Maintenance_Item__c 
+                                         WHERE Maintenance_Request__c IN :maintenanceRequestIds 
+                                         GROUP BY Maintenance_Request__c];
+    
+        for (AggregateResult ar : results) {
+            Id maintenanceRequestId = (Id) ar.get('Maintenance_Request__c');
+            Decimal minCycle = (Decimal) ar.get('minCycle');
+            Date dueDate = Date.today().addDays(minCycle.intValue());
+            caseToDueDateMap.put(maintenanceRequestId, dueDate);
+        }
+        for(Case c : maintenanceRequests){
+            if(maintenanceRequestIds.contains(c.Id)){
                 Case newCase = new Case();
                 newCase.Vehicle__c = c.Vehicle__c;
                 newCase.ProductId = c.ProductId;
                 newCase.Type = 'Routine Maintenance';
                 newCase.Subject = 'Future Routine Checkup';
                 newCase.Date_Reported__c = Date.today();
-                newCase.Date_Due__c = calculateDateDue(maintenanceRequestId);
+                newCase.Date_Due__c = caseToDueDateMap.get(c.Id);
                 routineCheckups.add(newCase);
-           }
-        }
-        if(routineCheckups.size()>0){
-            List<Equipment_Maintenance_Item__c> equipmentsToTransfer = [SELECT Maintenance_Request__c, Equipment__c FROM Equipment_Maintenance_Item__c WHERE Maintenance_Request__c = :maintenanceRequestId];
-            List<Equipment_Maintenance_Item__c> equipmentsToAdd = new List<Equipment_Maintenance_Item__c>();
-            for(Equipment_Maintenance_Item__c eq : equipmentsToTransfer){
-                Equipment_Maintenance_Item__c newItem = eq.clone();
-                newItem.Maintenance_Request__c = maintenanceRequestId;
-                equipmentsToAdd.add(newItem);
             }
-            insert equipmentsToAdd;
+        }
+
+        if(routineCheckups.size()>0){
             insert routineCheckups;
+            for (Integer i = 0; i < maintenanceRequests.size(); i++) {
+                oldAndNewMaintenanceRequest.put(maintenanceRequests[i].Id, routineCheckups[i].Id);
+            }
+            cloneEMIs(oldAndNewMaintenanceRequest);
         }
     }
-    public Date calculateDateDue(Id maintenanceRequestId){
-        List<AggregateResult> results = new List<AggregateResult>();
-        Date dueDate;
-        results = [SELECT Equipment__c, MIN(Equipment__r.Maintenance_Cycle__c) minCycle FROM Equipment_Maintenance_Item__c WHERE Maintenance_Request__c = :maintenanceRequestId GROUP BY Equipment__c];
-        for(AggregateResult ar : results){
-            Decimal minCycle = (Decimal) ar.get('minCycle');
-            Integer minCycleInt = minCycle.intValue();
-            Date todayDate = Date.today();
-            dueDate = todayDate.addDays(minCycleInt);
+    public static void cloneEMIs(Map<Id,Id> oldAndNewRequest){
+
+        List<Equipment_Maintenance_Item__c> clonedEquipment = new List<Equipment_Maintenance_Item__c>();
+        List<Equipment_Maintenance_Item__c> equipment = [SELECT Equipment__c, Equipment__r.Maintenance_Cycle__c, Maintenance_Request__c FROM Equipment_Maintenance_Item__c WHERE Maintenance_Request__c IN :oldAndNewRequest.keySet()];
+        for(Equipment_Maintenance_Item__c emi : equipment){
+            Equipment_Maintenance_Item__c emiClone = emi.clone();
+            emiClone.Maintenance_Request__c = oldAndNewRequest.get(emi.Maintenance_Request__c);
+            clonedEquipment.add(emiClone);
         }
-        return dueDate;
+        insert clonedEquipment;
+
     }
 }

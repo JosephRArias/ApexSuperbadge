@@ -25,6 +25,11 @@ private class MaintenanceRequestTest {
     @isTest
     static void testStatusShowing() {
         // TO DO: implement unit test
-        
+       Case c = new Case(Status = 'New', Type = 'Repair', Origin = 'Email');
+       insert c;
+       Equipment_Maintenance_Item__c emi = new 	Equipment_Maintenance_Item__c(Maintenance_Request__c = c.Id, Equipment__c = '01tbm000007ot9SAAQ');
+       insert emi;
+       c.Status = 'Closed';
+       update c;
     }
 }
